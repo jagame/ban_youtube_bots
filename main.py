@@ -14,7 +14,7 @@ import skimage
 import logging
 import config
 
-owner_profile_picture = Image.open("storage/profile_pic.jpg")
+owner_profile_picture = Image.open("storage/profile_pic.jpg") if config.CHECK_FOR_PROFILE_PICTURE else None
 
 
 def check_is_spam(comment):
@@ -36,36 +36,36 @@ def check_is_spam(comment):
             return True
 
     # Check if profile image is the same as my image
-    try:
-        logging.debug("Downloading image for user profile: {}".format(comment["authorProfileImageUrl"]))
-        data = requests.get(comment["authorProfileImageUrl"]).content
-        with open('storage/impostor.jpg', 'wb') as handle:
-            handle.write(data)
+    if config.CHECK_FOR_PROFILE_PICTURE:
+        try:
+            logging.debug("Downloading image for user profile: {}".format(comment["authorProfileImageUrl"]))
+            data = requests.get(comment["authorProfileImageUrl"]).content
+            with open('storage/impostor.jpg', 'wb') as handle:
+                handle.write(data)
 
-        impostor = Image.open('storage/impostor.jpg')
-        nate_resized_image = owner_profile_picture.resize((impostor.size[0], impostor.size[1]))
+            impostor = Image.open('storage/impostor.jpg')
+            nate_resized_image = owner_profile_picture.resize((impostor.size[0], impostor.size[1]))
 
-        with open('storage/nate_resized.jpg', 'wb') as handle:
-            nate_resized_image.save(handle)
+            with open('storage/nate_resized.jpg', 'wb') as handle:
+                nate_resized_image.save(handle)
 
-        difference = skimage.metrics.structural_similarity(np.asfarray(impostor.convert('L')),
-                                                           np.asfarray(nate_resized_image.convert('L')))
+            difference = skimage.metrics.structural_similarity(np.asfarray(impostor.convert('L')),
+                                                               np.asfarray(nate_resized_image.convert('L')))
 
-        logging.debug("Difference score from my profile pic is {}".format(difference))
-        if difference > 0.8:
-            with open('impostors/{}.jpg'.format(comment["authorChannelId"]["value"]), 'wb') as handle:
-                impostor.save(handle)
-            return True
-        return False
-    except Exception:  # Too broad, but I don't have time for this
-        return False
+            logging.debug("Difference score from my profile pic is {}".format(difference))
+            if difference > 0.8:
+                with open('impostors/{}.jpg'.format(comment["authorChannelId"]["value"]), 'wb') as handle:
+                    impostor.save(handle)
+                return True
+            return False
+        except Exception:  # Too broad, but I don't have time for this
+            return False
 
 
 def get_them_all(api_function, api_kwargs, key_path, value_path, prepopulated_list=[]):
     """
     Query the endpoint all the way through the pages (avoing google pagination) and returns a dictionary with all the
     responses in a dictionary with the key of your choice.
-
     :param api_function: googleapiclient API function to query, example: youtube.playlistItems
     :param api_kwargs: list of attributes to pass to the API endpoint in a dictionary - check API docs
     :param key_path: list of strings, containing the path to the item you want to use as key from the response
@@ -156,9 +156,8 @@ def load_comments(youtube, videos):
     :param videos: Dictionary of video names indexed by video ID
     :return: Dictionary
     """
-    comment_threads = load_from_storage('storage/comments.pickle', {})
-
     if config.CHECK_FOR_NEW_COMMENTS:
+        comment_threads = {}
         current_video = 0
         logging.info("\n- Checking last {} videos\n".format(config.LAST_N_VIDEOS))
         for video_id in videos.keys():
@@ -193,6 +192,8 @@ def load_comments(youtube, videos):
                 break
 
         save_into_storage('storage/comments.pickle', comment_threads)
+    else:
+        comment_threads = load_from_storage('storage/comments.pickle', {})
     return comment_threads
 
 
@@ -283,8 +284,8 @@ def load_videos(youtube):
 
         if len(new_videos) > 0:
             logging.info("Adding {} new videos\n".format(len(new_videos)))
-            for key, val in new_videos.items():
-                videos[key] = val
+            new_videos.update(videos)
+            videos = new_videos
         else:
             logging.info("No new videos\n")
         save_into_storage('storage/videos.pickle', videos)
@@ -355,6 +356,13 @@ def create_client(role):
     creds = get_credentials(role)
     # Create API client
     youtube = googleapiclient.discovery.build(config.API_SERVICE_NAME, config.API_VERSION, credentials=creds)
+
+
+def create_client(role):
+    # Query Youtube API for authentication or load from file
+    creds = get_credentials(role)
+    # Create API client
+    return googleapiclient.discovery.build(config.API_SERVICE_NAME, config.API_VERSION, credentials=creds)
 
 
 def main():
